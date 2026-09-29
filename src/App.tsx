@@ -1,65 +1,44 @@
 import { useState, useEffect, useRef } from "react"
-import type { Screen, HomeTab, FormData, RecurringAvail, OneTimeOverride, AvailEditTarget, Slot, TimetablePosition } from "./types"
-import { INITIAL_FORM, INITIAL_RECURRING, INITIAL_OVERRIDES, SAMPLE_SLOTS } from "./data"
-import { useIsDesktop } from "./components/shared"
-import { applyStatusBar, listenForBackButton } from "./native"
+import { BACK_TARGETS, type Screen } from "./navigation"
+import { useIsDesktop } from "./shared/ui"
+import { applyStatusBar, listenForBackButton } from "./shared/native"
+import { HomeScreen, MINISTRIES, type HomeTab } from "./shared/home"
 
 // Wizard
-import { WelcomeScreen, TellNameScreen, JoinGroupScreen, PendingScreen } from "./screens/wizard"
-import { DesktopJoinGroupScreen, DesktopPendingScreen } from "./screens/desktop"
-import { HomeScreen, MINISTRIES } from "./screens/home"
+import { WelcomeScreen, TellNameScreen, JoinGroupScreen, PendingScreen } from "./features/wizard/wizard"
+import { DesktopJoinGroupScreen, DesktopPendingScreen } from "./features/wizard/desktop"
+import { useWizard } from "./features/wizard/useWizard"
 
 // Availability
-import { AvailabilityTab, SetRecurringScreen, AddOverrideScreen } from "./screens/availability"
+import { AvailabilityTab, SetRecurringScreen, AddOverrideScreen } from "./features/availability/availability"
+import { useAvailability } from "./features/availability/useAvailability"
 
 // Open Slots
-import { SlotList, SlotVolunteerScreen, SlotServingScreen, SlotFilledScreen } from "./screens/slots"
-
-// This week, on today. Phones start on the one-day view (big and easy to read); tablets and computers show the whole week.
-function initialTimetablePosition(): TimetablePosition {
-  return {
-    weekOffset: 0,
-    view: window.matchMedia("(min-width: 640px)").matches ? "week" : "day",
-    dayIndex: (new Date().getDay() + 6) % 7,
-  }
-}
+import { SlotList, SlotVolunteerScreen, SlotServingScreen, SlotFilledScreen } from "./features/slots/slots"
+import { useSlots } from "./features/slots/useSlots"
 
 export default function App() {
   const isDesktop = useIsDesktop()
   const [screen, setScreen] = useState<Screen>("welcome")
   const [prevScreen, setPrevScreen] = useState<Screen>("welcome")
-  const [form, setForm] = useState<FormData>(INITIAL_FORM)
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
 
   const [homeTab, setHomeTab] = useState<HomeTab>("availability")
   const [ministry, setMinistry] = useState(MINISTRIES[0])
 
-  const [recurringEntries, setRecurringEntries] = useState<RecurringAvail[]>(INITIAL_RECURRING)
-  const [overrides, setOverrides] = useState<OneTimeOverride[]>(INITIAL_OVERRIDES)
-  const [editTarget, setEditTarget] = useState<AvailEditTarget | null>(null)
-  // Kept here so the timetable shows the same week and view after an add/edit screen.
-  const [timetablePosition, setTimetablePosition] = useState(initialTimetablePosition)
-
-  const [slots, setSlots] = useState<Slot[]>(SAMPLE_SLOTS)
-  const [activeSlot, setActiveSlot] = useState<Slot | null>(null)
+  const wizard = useWizard()
+  const availability = useAvailability()
+  const slots = useSlots()
 
   function go(to: Screen) {
     setPrevScreen(screen)
     setScreen(to)
   }
 
-  function updateForm(partial: Partial<FormData>) {
-    setForm(f => ({ ...f, ...partial }))
-  }
-
   function reset() {
-    setForm(INITIAL_FORM)
-    setFirstName("")
-    setLastName("")
+    wizard.reset()
     setHomeTab("availability")
     setMinistry(MINISTRIES[0])
-    setTimetablePosition(initialTimetablePosition())
+    availability.resetPosition()
     go("welcome")
   }
 
@@ -75,21 +54,22 @@ export default function App() {
   prevScreenRef.current = prevScreen
   const goRef = useRef(go)
   goRef.current = go
-  useEffect(() => listenForBackButton(() => screenRef.current, () => prevScreenRef.current, to => goRef.current(to)), [])
+  useEffect(() => listenForBackButton(BACK_TARGETS, () => screenRef.current, () => prevScreenRef.current, to => goRef.current(to)), [])
 
   switch (screen) {
+    // ─── Wizard ───────────────────────────────────────────────────────────────
     case "welcome":
       return <WelcomeScreen onStart={() => go("tell-name")} />
 
     case "tell-name":
       return (
         <TellNameScreen
-          firstName={firstName}
-          lastName={lastName}
-          setFirstName={setFirstName}
-          setLastName={setLastName}
+          firstName={wizard.firstName}
+          lastName={wizard.lastName}
+          setFirstName={wizard.setFirstName}
+          setLastName={wizard.setLastName}
           onContinue={() => {
-            updateForm({ name: `${firstName} ${lastName}`.trim() })
+            wizard.saveName()
             go("join-group")
           }}
         />
@@ -99,23 +79,24 @@ export default function App() {
       // Back returns to wherever the member came from: name entry during onboarding, or Home via "+ Join Another Ministry".
       const back = () => go(prevScreen)
       return isDesktop ? (
-        <DesktopJoinGroupScreen data={form} setData={updateForm} onJoin={() => go("pending")} onBack={back} />
+        <DesktopJoinGroupScreen data={wizard.form} setData={wizard.updateForm} onJoin={() => go("pending")} onBack={back} />
       ) : (
-        <JoinGroupScreen data={form} setData={updateForm} onJoin={() => go("pending")} onBack={back} />
+        <JoinGroupScreen data={wizard.form} setData={wizard.updateForm} onJoin={() => go("pending")} onBack={back} />
       )
     }
 
     case "pending":
       return isDesktop ? (
-        <DesktopPendingScreen data={form} onBack={reset} onApproved={() => go("home")} />
+        <DesktopPendingScreen data={wizard.form} onBack={reset} onApproved={() => go("home")} />
       ) : (
-        <PendingScreen data={form} onBack={reset} onApproved={() => go("home")} />
+        <PendingScreen data={wizard.form} onBack={reset} onApproved={() => go("home")} />
       )
 
+    // ─── Home (holds the Availability and Open Slots tabs) ────────────────────
     case "home":
       return (
         <HomeScreen
-          userName={form.name || "Maria Santos"}
+          userName={wizard.form.name || "Maria Santos"}
           ministry={ministry}
           onMinistryChange={setMinistry}
           tab={homeTab}
@@ -124,41 +105,31 @@ export default function App() {
         >
           {homeTab === "availability" ? (
             <AvailabilityTab
-              recurringEntries={recurringEntries}
-              overrides={overrides}
-              slots={slots}
-              onViewSlot={slot => { setActiveSlot(slot); go("slot-serving") }}
-              position={timetablePosition}
-              onPositionChange={change => setTimetablePosition(current => ({ ...current, ...change }))}
-              onAddRecurring={() => { setEditTarget(null); go("set-recurring") }}
-              onAddOverride={() => { setEditTarget(null); go("add-override") }}
-              onEditRecurring={e => { setEditTarget({ kind: "recurring", entry: e }); go("set-recurring") }}
-              onEditOverride={e => { setEditTarget({ kind: "override", entry: e }); go("add-override") }}
-              onRemoveRecurring={id => setRecurringEntries(prev => prev.filter(e => e.id !== id))}
-              onRemoveOverride={id => setOverrides(prev => prev.filter(e => e.id !== id))}
+              recurringEntries={availability.recurringEntries}
+              overrides={availability.overrides}
+              slots={slots.slots}
+              onViewSlot={slot => { slots.setActiveSlot(slot); go("slot-serving") }}
+              position={availability.timetablePosition}
+              onPositionChange={availability.changePosition}
+              onAddRecurring={() => { availability.startRecurring(); go("set-recurring") }}
+              onAddOverride={() => { availability.startOverride(); go("add-override") }}
+              onEditRecurring={e => { availability.startRecurring(e); go("set-recurring") }}
+              onEditOverride={e => { availability.startOverride(e); go("add-override") }}
+              onRemoveRecurring={availability.removeRecurring}
+              onRemoveOverride={availability.removeOverride}
             />
           ) : (
-            <SlotList
-              slots={slots}
-              onSlotTap={slot => {
-                setActiveSlot(slot)
-                go(slot.status === "filled" ? "slot-filled" : slot.status === "serving" ? "slot-serving" : "slot-volunteer")
-              }}
-            />
+            <SlotList slots={slots.slots} onSlotTap={slot => go(slots.openSlot(slot))} />
           )}
         </HomeScreen>
       )
 
+    // ─── Availability ─────────────────────────────────────────────────────────
     case "set-recurring":
       return (
         <SetRecurringScreen
-          initial={editTarget?.kind === "recurring" ? editTarget.entry : undefined}
-          onSave={entry => {
-            setRecurringEntries(prev =>
-              prev.find(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [...prev, entry]
-            )
-            go("home")
-          }}
+          initial={availability.editingRecurring}
+          onSave={entry => { availability.saveRecurring(entry); go("home") }}
           onBack={() => go("home")}
         />
       )
@@ -166,38 +137,27 @@ export default function App() {
     case "add-override":
       return (
         <AddOverrideScreen
-          initial={editTarget?.kind === "override" ? editTarget.entry : undefined}
-          onSave={entry => {
-            setOverrides(prev =>
-              prev.find(e => e.id === entry.id) ? prev.map(e => e.id === entry.id ? entry : e) : [...prev, entry]
-            )
-            go("home")
-          }}
+          initial={availability.editingOverride}
+          onSave={entry => { availability.saveOverride(entry); go("home") }}
           onBack={() => go("home")}
         />
       )
 
+    // ─── Open Slots ───────────────────────────────────────────────────────────
     case "slot-volunteer":
-      return activeSlot ? (
+      return slots.activeSlot ? (
         <SlotVolunteerScreen
-          slot={activeSlot}
-          onVolunteer={() => {
-            setSlots(prev => prev.map(s => s.id === activeSlot.id ? { ...s, status: "serving", filledSpots: s.filledSpots + 1 } : s))
-            setActiveSlot(prev => prev ? { ...prev, status: "serving", filledSpots: prev.filledSpots + 1 } : prev)
-            go("slot-serving")
-          }}
+          slot={slots.activeSlot}
+          onVolunteer={() => { slots.volunteer(); go("slot-serving") }}
           onBack={() => go("home")}
         />
       ) : null
 
     case "slot-serving":
-      return activeSlot ? (
+      return slots.activeSlot ? (
         <SlotServingScreen
-          slot={activeSlot}
-          onCancelSpot={() => {
-            setSlots(prev => prev.map(s => s.id === activeSlot.id ? { ...s, status: "open", filledSpots: Math.max(0, s.filledSpots - 1) } : s))
-            go("home")
-          }}
+          slot={slots.activeSlot}
+          onCancelSpot={() => { slots.cancelSpot(); go("home") }}
           onBack={() => go("home")}
         />
       ) : null

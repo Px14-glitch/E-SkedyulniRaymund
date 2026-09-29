@@ -1,6 +1,7 @@
 import { useState } from "react"
-import type { FormData } from "../types"
-import { ScreenShell, Card, Logo, Button, InputField, BackButton, ClockIcon } from "../components/shared"
+import type { FormData } from "./types"
+import { ScreenShell, Card, Logo, Button, InputField, BackButton, ClockIcon } from "../../shared/ui"
+import { EXAMPLE_GROUPS, PENDING_STEPS } from "./data"
 
 export function WelcomeScreen({ onStart }: { onStart: () => void }) {
   return (
@@ -68,15 +69,6 @@ export function TellNameScreen({ firstName, lastName, setFirstName, setLastName,
     </ScreenShell>
   )
 }
-
-export const EXAMPLE_GROUPS: Record<string, string> = {
-  "LECT-2024": "Lectors Ministry",
-  "ALTAR-01": "Altar Servers",
-  "CHOIR-A": "Parish Choir",
-  "YOUTH-GRP": "Youth Ministry",
-}
-
-export const PENDING_STEPS = ["Your request has been sent to the group leader.", "They will review and approve your request."]
 
 export function JoinGroupScreen({
   data, setData, onJoin, onBack,

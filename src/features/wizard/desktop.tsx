@@ -1,7 +1,7 @@
 import { useState } from "react"
-import type { FormData } from "../types"
-import { Button, InputField, Card, BackButton, ClockIcon } from "../components/shared"
-import { EXAMPLE_GROUPS, PENDING_STEPS } from "./wizard"
+import type { FormData } from "./types"
+import { Button, InputField, Card, BackButton, ClockIcon } from "../../shared/ui"
+import { EXAMPLE_GROUPS, PENDING_STEPS } from "./data"
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 

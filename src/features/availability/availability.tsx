@@ -1,9 +1,10 @@
 import { useState } from "react"
-import type { RecurringAvail, OneTimeOverride, Slot, TimetablePosition } from "../types"
-import { DAYS_ORDER } from "../data"
-import { Button, useSheetClose } from "../components/shared"
-import { WeeklyTimetable, addDaysTo, mondayOf, type TimetableEvent } from "../components/timetable"
-import { getMyAssignments, type Assignment } from "../integration/assignments"
+import type { RecurringAvail, OneTimeOverride, TimetablePosition } from "./types"
+import { DAYS_ORDER } from "./data"
+import { Button, useSheetClose } from "../../shared/ui"
+import { slotTimeTo24h, type Slot } from "../../shared/slot"
+import { WeeklyTimetable, addDaysTo, mondayOf, type TimetableEvent } from "./timetable"
+import { getMyAssignments, type Assignment } from "../../integration/assignments"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,13 +33,6 @@ function formatDate(dateStr: string): string {
 
 function isEndNotAfterStart(start: string, end: string): boolean {
   return end <= start
-}
-
-/** "7:00 PM" (how slots store their time) → "19:00". */
-function slotTimeTo24h(time: string): string {
-  const [clock, period] = time.split(" ")
-  const [hour, minute] = clock.split(":").map(Number)
-  return stateToTime(hour, minute, period as "AM" | "PM")
 }
 
 /** Adds minutes to an "HH:MM" time. */

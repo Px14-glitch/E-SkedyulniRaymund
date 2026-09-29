@@ -1,31 +1,22 @@
 import { Capacitor, SystemBars, SystemBarsStyle, SystemBarType } from '@capacitor/core'
 import { App as CapApp } from '@capacitor/app'
-import type { Screen } from './types'
 
 /** True when running inside the Android app (not a normal browser). */
 const isNativeApp = Capacitor.isNativePlatform()
 
+/**
+ * Where the Android back button goes from a screen. "exit" leaves the app;
+ * "previous" returns to whichever screen opened this one. Each feature lists its
+ * own screens in its navigation.ts; src/navigation.ts combines them.
+ */
+export type BackTarget<S extends string> = S | 'exit' | 'minimize' | 'previous'
+
 /** Screens with a navy top bar get white status-bar icons; light screens get dark icons. */
-export function applyStatusBar(screen: Screen) {
+export function applyStatusBar(screen: string) {
   document.body.dataset.screen = screen
   if (!isNativeApp) return
   const style = screen === 'home' ? SystemBarsStyle.Dark : SystemBarsStyle.Light
   SystemBars.setStyle({ style, bar: SystemBarType.StatusBar }).catch(() => {})
-}
-
-// Where the Android back button goes from each screen. "exit" leaves the app;
-// "previous" returns to whichever screen opened this one.
-const BACK_TARGET: Record<Screen, Screen | 'exit' | 'minimize' | 'previous'> = {
-  welcome: 'exit',
-  'tell-name': 'welcome',
-  'join-group': 'previous',
-  pending: 'welcome',
-  home: 'minimize',
-  'set-recurring': 'home',
-  'add-override': 'home',
-  'slot-volunteer': 'home',
-  'slot-serving': 'home',
-  'slot-filled': 'home',
 }
 
 /**
@@ -34,7 +25,12 @@ const BACK_TARGET: Record<Screen, Screen | 'exit' | 'minimize' | 'previous'> = {
  * 2. Otherwise go to the previous screen.
  * 3. On the first screens, leave or minimize the app.
  */
-export function listenForBackButton(getScreen: () => Screen, getPrevScreen: () => Screen, go: (screen: Screen) => void) {
+export function listenForBackButton<S extends string>(
+  backTargets: Record<S, BackTarget<S>>,
+  getScreen: () => S,
+  getPrevScreen: () => S,
+  go: (screen: S) => void,
+) {
   if (!isNativeApp) return () => {}
   const handle = CapApp.addListener('backButton', () => {
     const backdrop = document.querySelector<HTMLElement>('[role="dialog"] > div[aria-hidden="true"]')
@@ -42,10 +38,10 @@ export function listenForBackButton(getScreen: () => Screen, getPrevScreen: () =
       backdrop.click()
       return
     }
-    const target = BACK_TARGET[getScreen()]
+    const target = backTargets[getScreen()]
     if (target === 'exit') CapApp.exitApp()
     else if (target === 'minimize') CapApp.minimizeApp()
-    else go(target === 'previous' ? getPrevScreen() : target)
+    else go(target === 'previous' ? getPrevScreen() : target as S)
   })
   return () => { handle.then(h => h.remove()) }
 }

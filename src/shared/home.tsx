@@ -1,6 +1,7 @@
 import { useState } from "react"
-import type { HomeTab } from "../types"
-import { Button, useSheetClose } from "../components/shared"
+import { Button, useSheetClose } from "./ui"
+
+export type HomeTab = "availability" | "slots"
 
 type Ministry = {
   id: string

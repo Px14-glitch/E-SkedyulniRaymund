@@ -1,4 +1,4 @@
-import type { Slot, SlotStatus } from "../types"
+import type { Slot, SlotStatus } from "../../shared/slot"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

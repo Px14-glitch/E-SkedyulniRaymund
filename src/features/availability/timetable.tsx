@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Button, useSheetClose } from "./shared"
+import { Button, useSheetClose } from "../../shared/ui"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

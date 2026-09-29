@@ -1,22 +1,4 @@
-import type { FormData, RecurringAvail, OneTimeOverride, Slot } from "./types"
-
-export const DAYS_ORDER = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
-
-export const INITIAL_FORM: FormData = {
-  name: "",
-  groupCode: "",
-  groupName: "",
-}
-
-export const INITIAL_RECURRING: RecurringAvail[] = [
-  { id: "r1", days: ["Sun"], startTime: "08:00", endTime: "12:00" },
-  { id: "r2", days: ["Wed"], startTime: "18:00", endTime: "20:30" },
-]
-
-export const INITIAL_OVERRIDES: OneTimeOverride[] = [
-  { id: "o1", date: "2026-09-28", type: "blocked" },
-  { id: "o2", date: "2026-10-05", type: "free", startTime: "13:00", endTime: "17:00" },
-]
+import type { Slot } from "../../shared/slot"
 
 export const SAMPLE_SLOTS: Slot[] = [
   { id: "s1", date: "2026-09-27", time: "8:00 AM", massName: "Sunday Mass", totalSpots: 3, filledSpots: 1, status: "open" },
