@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import type { RecurringAvail, OneTimeOverride, TimetablePosition } from "./types"
 import { DAYS_ORDER } from "./data"
 import { Button, useSheetClose } from "../../shared/ui"
@@ -288,6 +288,82 @@ function OverrideEntryCard({ entry, onEdit, onRemove }: {
   )
 }
 
+// ─── Full schedule ────────────────────────────────────────────────────────────
+
+function CalendarIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="2.2" />
+      <path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function WeekNav({ weekOffset, weekStart, onPositionChange }: {
+  weekOffset: number
+  weekStart: Date
+  onPositionChange: (change: Partial<TimetablePosition>) => void
+}) {
+  const weekEnd = addDaysTo(weekStart, 6)
+  return (
+    <>
+      <div className="my-4 grid grid-cols-3 gap-1">
+        <Button variant="ghost" size="compact" onClick={() => onPositionChange({ weekOffset: weekOffset - 1 })} ariaLabel="Previous week">‹ Previous</Button>
+        <Button variant={weekOffset === 0 ? "secondary" : "ghost"} size="compact" onClick={() => onPositionChange({ weekOffset: 0 })} className="whitespace-nowrap">This Week</Button>
+        <Button variant="ghost" size="compact" onClick={() => onPositionChange({ weekOffset: weekOffset + 1 })} ariaLabel="Next week">Next ›</Button>
+      </div>
+      <p className="mb-4 text-center text-[19px] font-extrabold text-[#1B3A6B]">
+        {weekStart.toLocaleDateString("en-US", { month: "long", day: "numeric" })} – {weekEnd.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+      </p>
+    </>
+  )
+}
+
+/** The whole timetable on its own full-screen page, where it can scroll. */
+function FullScheduleDialog({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose() }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  // Keep the home page behind the dialog from scrolling while it's open.
+  useEffect(() => {
+    const html = document.documentElement
+    const previous = [html.style.overflow, document.body.style.overflow]
+    html.style.overflow = "hidden"
+    document.body.style.overflow = "hidden"
+    return () => { [html.style.overflow, document.body.style.overflow] = previous }
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-40 flex flex-col bg-[#F4F6FB]" role="dialog" aria-modal="true" aria-labelledby="full-schedule-title">
+      <div className="bg-[#1B3A6B] px-4 pb-3 text-white" style={{ paddingTop: "calc(0.75rem + env(safe-area-inset-top))" }}>
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+          <h2 id="full-schedule-title" className="text-2xl font-extrabold">My Schedule</h2>
+          <button onClick={onClose} className="flex min-h-[56px] shrink-0 items-center gap-2 rounded-xl bg-white px-5 text-[19px] font-bold text-[#1B3A6B] hover:bg-[#E8EDF7]">
+            <span className="text-[22px] leading-none" aria-hidden="true">✕</span> Close
+          </button>
+        </div>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-4 pb-3">
+        <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col">{children}</div>
+      </div>
+
+      <div className="border-t border-[#D1D9E8] bg-white px-4 pt-3" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+        <button onClick={onClose} className="mx-auto flex min-h-[60px] w-full max-w-lg items-center justify-center rounded-xl bg-[#1B3A6B] text-[20px] font-bold text-white hover:bg-[#142d54]">
+          Close
+        </button>
+      </div>
+
+      {/* Android back button: the app's @capacitor/app backButton listener (shared/native.ts) closes the top-most
+          pop-up by clicking its backdrop. This hidden one is last, so an event pop-up inside closes before the dialog. */}
+      <div hidden aria-hidden="true" onClick={onClose} />
+    </div>
+  )
+}
+
 // ─── Availability Tab (Home) ──────────────────────────────────────────────────
 
 export function AvailabilityTab({
@@ -309,9 +385,19 @@ export function AvailabilityTab({
   onViewSlot: (slot: Slot) => void
 }) {
   const [confirmRemove, setConfirmRemove] = useState<{ kind: "recurring" | "override"; id: string } | null>(null)
+  const [showFullSchedule, setShowFullSchedule] = useState(false)
   const { weekOffset } = position
   const weekStart = addDaysTo(mondayOf(new Date()), weekOffset * 7)
-  const weekEnd = addDaysTo(weekStart, 6)
+  // The preview and the full schedule show the same data, week and view.
+  const timetableProps = {
+    events: availabilityEvents(recurringEntries, overrides, getMyAssignments(), slots, weekStart, onViewSlot),
+    weekStart,
+    legend: [{ label: "Available", color: "green" as const }, { label: "Not available", color: "red" as const }, { label: "Serving", color: "navy" as const }],
+    view: position.view,
+    onViewChange: (view: TimetablePosition["view"]) => onPositionChange({ view }),
+    dayIndex: position.dayIndex,
+    onDayIndexChange: (dayIndex: number) => onPositionChange({ dayIndex }),
+  }
 
   const isEmpty = recurringEntries.length === 0 && overrides.length === 0
 
@@ -327,24 +413,38 @@ export function AvailabilityTab({
       <p className="text-2xl font-extrabold text-[#1B3A6B]">My Availability This Week</p>
       <p className="mt-1 text-[17px] leading-relaxed text-[#64748B]">Green boxes show when you're free. Red boxes show when you're not available. Navy boxes are when you're serving.</p>
 
-      <div className="my-4 grid grid-cols-3 gap-1">
-        <Button variant="ghost" size="compact" onClick={() => onPositionChange({ weekOffset: weekOffset - 1 })} ariaLabel="Previous week">‹ Previous</Button>
-        <Button variant={weekOffset === 0 ? "secondary" : "ghost"} size="compact" onClick={() => onPositionChange({ weekOffset: 0 })} className="whitespace-nowrap">This Week</Button>
-        <Button variant="ghost" size="compact" onClick={() => onPositionChange({ weekOffset: weekOffset + 1 })} ariaLabel="Next week">Next ›</Button>
-      </div>
-      <p className="mb-4 text-center text-[19px] font-extrabold text-[#1B3A6B]">
-        {weekStart.toLocaleDateString("en-US", { month: "long", day: "numeric" })} – {weekEnd.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-      </p>
+      <WeekNav weekOffset={weekOffset} weekStart={weekStart} onPositionChange={onPositionChange} />
 
-      <WeeklyTimetable
-        events={availabilityEvents(recurringEntries, overrides, getMyAssignments(), slots, weekStart, onViewSlot)}
-        weekStart={weekStart}
-        legend={[{ label: "Available", color: "green" }, { label: "Not available", color: "red" }, { label: "Serving", color: "navy" }]}
-        view={position.view}
-        onViewChange={view => onPositionChange({ view })}
-        dayIndex={position.dayIndex}
-        onDayIndexChange={dayIndex => onPositionChange({ dayIndex })}
-      />
+      {/* A still preview only: swiping over it scrolls the page, tapping it opens the full schedule. */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Open your full schedule"
+        onClick={() => setShowFullSchedule(true)}
+        onKeyDown={event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault()
+            setShowFullSchedule(true)
+          }
+        }}
+        className="cursor-pointer rounded-2xl"
+      >
+        <WeeklyTimetable {...timetableProps} layout="preview" />
+      </div>
+
+      <button
+        onClick={() => setShowFullSchedule(true)}
+        className="mt-4 flex min-h-[60px] w-full items-center justify-center gap-3 rounded-xl bg-[#1B3A6B] px-4 text-[20px] font-bold text-white hover:bg-[#142d54] transition-colors"
+      >
+        <CalendarIcon /> See full schedule
+      </button>
+
+      {showFullSchedule && (
+        <FullScheduleDialog onClose={() => setShowFullSchedule(false)}>
+          <WeekNav weekOffset={weekOffset} weekStart={weekStart} onPositionChange={onPositionChange} />
+          <WeeklyTimetable {...timetableProps} layout="full" />
+        </FullScheduleDialog>
+      )}
 
       {!isEmpty && (
         <div className="mx-auto mt-6 flex max-w-lg flex-col gap-2">
