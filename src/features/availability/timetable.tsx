@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Button, useSheetClose } from "../../shared/ui"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,9 +153,64 @@ function EventSheet({ event, date, onClose }: { event: TimetableEvent; date: Dat
   )
 }
 
+// ─── Event block ──────────────────────────────────────────────────────────────
+
+const MIN_FIT = 0.6 // the smallest the text may shrink to, as a share of its normal size
+
+/** One box on the timetable. Its text shrinks step by step until it fits inside the box, and re-fits when the box is resized. */
+function EventBlock({ event, timeText, showDetail, onClick, ariaLabel, style }: {
+  event: TimetableEvent
+  timeText: string
+  showDetail: boolean
+  onClick: () => void
+  ariaLabel: string
+  style: CSSProperties
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [fit, setFit] = useState(1)
+
+  useLayoutEffect(() => {
+    const box = ref.current
+    if (!box) return
+    function refit() {
+      if (!box) return
+      const overflows = () => box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1
+      let scale = 1
+      box.style.setProperty("--fit", "1")
+      while (scale > MIN_FIT && overflows()) {
+        scale = Math.max(MIN_FIT, Math.round((scale - 0.05) * 100) / 100)
+        box.style.setProperty("--fit", String(scale))
+      }
+      setFit(scale)
+    }
+    refit()
+    const observer = new ResizeObserver(refit)
+    observer.observe(box)
+    document.fonts?.ready.then(refit)
+    return () => observer.disconnect()
+  }, [event.label, timeText, event.detail, showDetail])
+
+  const size = (px: number) => ({ fontSize: `calc(${px}px * var(--fit, ${fit}))` })
+
+  return (
+    <button
+      ref={ref}
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className={`absolute z-10 flex flex-col items-center justify-center overflow-hidden rounded-lg border-2 px-1.5 py-1 text-center shadow-sm transition-transform hover:scale-[1.02] focus-visible:z-20 ${TIMETABLE_COLORS[event.color].block}`}
+      style={style}
+    >
+      <span className="font-extrabold leading-tight" style={size(16)}>{event.label}</span>
+      <span className="mt-0.5 font-bold leading-tight" style={size(14)}>{timeText}</span>
+      {/* The detail fits in the wide one-day column, and in the week view on large screens. */}
+      {event.detail && <span className={`font-semibold leading-tight ${showDetail ? "" : "hidden lg:block"}`} style={size(14)}>{event.detail}</span>}
+    </button>
+  )
+}
+
 // ─── Timetable ────────────────────────────────────────────────────────────────
 
-export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange, dayIndex, onDayIndexChange }: {
+export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange, dayIndex, onDayIndexChange, layout = "inline" }: {
   events: TimetableEvent[]
   weekStart: Date // a Monday
   legend?: Array<{ label: string; color: TimetableColor }>
@@ -164,13 +219,24 @@ export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange,
   onViewChange: (view: "week" | "day") => void
   dayIndex: number
   onDayIndexChange: (index: number) => void
+  // "preview": a short, still picture of the first rows (no scrolling, no taps) for the home page.
+  // "full": the whole table at its natural height, for the full-screen schedule, whose page scrolls up and down.
+  layout?: "inline" | "preview" | "full"
 }) {
+  const preview = layout === "preview"
   const today = useMemo(() => new Date(), [])
   const days = Array.from({ length: 7 }, (_, index) => addDaysTo(weekStart, index))
   const todayIndex = days.findIndex(date => sameDate(date, today))
 
   const [selected, setSelected] = useState<{ event: TimetableEvent; date: Date } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLDivElement>(null) // "full" only: the day header, kept outside the sideways scroll so it can stick to the page
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  // "full": the day header follows the table when it's swiped sideways.
+  function syncHeader() {
+    if (headerRef.current && scrollRef.current) headerRef.current.scrollLeft = scrollRef.current.scrollLeft
+  }
 
   // Show at least 6 AM – 9 PM, stretching to fit any earlier or later entry. All-day blocks fill whatever is shown.
   const timed = events.filter(event => !event.allDay)
@@ -187,23 +253,99 @@ export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange,
   useEffect(() => {
     const container = scrollRef.current
     if (!container || view !== "week" || todayIndex < 1) return
-    const column = container.querySelector<HTMLElement>(`[data-day="${todayIndex}"]`)
+    const column = rootRef.current?.querySelector<HTMLElement>(`[data-day="${todayIndex}"]`)
     if (column && container.scrollWidth > container.clientWidth) {
       container.scrollLeft = Math.max(0, column.offsetLeft - 96)
+      syncHeader()
     }
   }, [view, todayIndex, weekStart])
 
-  const columns = view === "week" ? "var(--time-col) repeat(7, minmax(120px, 1fr))" : "var(--time-col) minmax(0, 1fr)"
+  // The preview can't be scrolled, so start it at the hour of the earliest entry shown instead of an empty morning.
+  // Only the preview: every other layout starts at the first hour.
+  const shownIndexes = shownDays.map(day => day.index)
+  const earliestHour = Math.min(...timed.filter(event => shownIndexes.includes(event.day)).map(event => Math.floor(toMinutes(event.start) / 60)))
+  const previewTop = Number.isFinite(earliestHour) ? (earliestHour - firstHour) * HOUR_HEIGHT : 0
+  useEffect(() => {
+    if (preview && scrollRef.current) scrollRef.current.scrollTop = previewTop
+  }, [preview, previewTop])
 
-  return (
-    <div>
-      {/* Week / Day switch */}
-      <div className="mb-4 flex gap-1 rounded-xl bg-[#E8EDF7] p-1" role="group" aria-label="How to show your availability">
-        <Button variant={view === "week" ? "tabActive" : "tabInactive"} size="compact" onClick={() => onViewChange("week")} ariaPressed={view === "week"}>Whole Week</Button>
-        <Button variant={view === "day" ? "tabActive" : "tabInactive"} size="compact" onClick={() => onViewChange("day")} ariaPressed={view === "day"}>One Day</Button>
+  const columns = view === "week" ? "var(--time-col) repeat(7, minmax(120px, 1fr))" : "var(--time-col) minmax(0, 1fr)"
+  const minWidth = view === "week" ? "min-w-[916px] lg:min-w-0" : ""
+  const frame = "[--time-col:76px] sm:[--time-col:96px] border-2 border-[#1B3A6B]/80 bg-white shadow-sm"
+
+  const headerRow = (
+    <div className="sticky top-0 z-30 grid border-b-2 border-[#1B3A6B]/80" style={{ gridTemplateColumns: columns }}>
+      <div className="sticky left-0 z-10 border-r-2 border-[#1B3A6B]/80 bg-[#E8EDF7] px-2 py-3 text-center text-[14px] font-bold text-[#1B3A6B]">Time</div>
+      {shownDays.map(({ date, index }) => {
+        const isToday = index === todayIndex
+        return (
+          <div
+            key={index}
+            data-day={index}
+            className={`border-r border-[#9BA8C0] px-2 py-2 text-center last:border-r-0 ${isToday ? "bg-[#1B3A6B] text-white" : "bg-[#E8EDF7] text-[#1B3A6B]"}`}
+          >
+            <p className="text-[17px] font-extrabold leading-tight">{DAY_LONG[index]}</p>
+            <p className={`text-[15px] font-semibold ${isToday ? "text-white" : "text-[#475569]"}`}>
+              {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{isToday ? " · Today" : ""}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const body = (
+    <div className="grid" style={{ gridTemplateColumns: columns }}>
+      {/* Time labels */}
+      <div className="sticky left-0 z-20 border-r-2 border-[#1B3A6B]/80 bg-[#E8EDF7]">
+        {hours.map(hour => (
+          <div key={hour} className="flex flex-col items-center justify-center border-b border-[#9BA8C0] px-1 text-center last:border-b-0" style={{ height: HOUR_HEIGHT }}>
+            <span className="text-[16px] font-extrabold leading-tight text-[#1B3A6B]">{hourLabel(hour)}</span>
+          </div>
+        ))}
       </div>
 
-      {view === "day" && (
+      {/* Day columns */}
+      {shownDays.map(({ date, index }) => (
+        <div
+          key={index}
+          className={`relative border-r border-[#9BA8C0] last:border-r-0 ${index === todayIndex ? "bg-[#1B3A6B]/[0.04]" : ""}`}
+          style={{
+            height: gridHeight,
+            backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_HEIGHT / 2 - 1}px, #E2E8F0 ${HOUR_HEIGHT / 2 - 1}px, #E2E8F0 ${HOUR_HEIGHT / 2}px, transparent ${HOUR_HEIGHT / 2}px, transparent ${HOUR_HEIGHT - 1}px, #9BA8C0 ${HOUR_HEIGHT - 1}px, #9BA8C0 ${HOUR_HEIGHT}px)`,
+          }}
+        >
+          {layoutDay(placed.filter(event => event.day === index)).map(({ event, lane, lanes }) => {
+            const top = ((toMinutes(event.start) - firstHour * 60) / 60) * HOUR_HEIGHT
+            const height = Math.max(((toMinutes(event.end) - toMinutes(event.start)) / 60) * HOUR_HEIGHT, HOUR_HEIGHT * 0.85)
+            const width = 100 / lanes
+            const timeText = event.allDay ? "All day" : formatRange(event.start, event.end)
+            return (
+              <EventBlock
+                key={event.id}
+                event={event}
+                timeText={timeText}
+                showDetail={view === "day"}
+                onClick={() => setSelected({ event, date })}
+                ariaLabel={`${event.label}, ${DAY_LONG[index]}, ${event.allDay ? "all day" : `${formatClock(event.start)} to ${formatClock(event.end)}`}${event.detail ? `, ${event.detail}` : ""}`}
+                style={{ top: top + 2, height: height - 4, left: `calc(${lane * width}% + 3px)`, width: `calc(${width}% - 6px)` }}
+              />
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
+
+  return (
+    <div ref={rootRef}>
+      {/* Week / Day switch */}
+      {!preview && <div className="mb-4 flex gap-1 rounded-xl bg-[#E8EDF7] p-1" role="group" aria-label="How to show your availability">
+        <Button variant={view === "week" ? "tabActive" : "tabInactive"} size="compact" onClick={() => onViewChange("week")} ariaPressed={view === "week"}>Whole Week</Button>
+        <Button variant={view === "day" ? "tabActive" : "tabInactive"} size="compact" onClick={() => onViewChange("day")} ariaPressed={view === "day"}>One Day</Button>
+      </div>}
+
+      {view === "day" && !preview && (
         <div className="mb-4 grid grid-cols-7 gap-1.5" role="group" aria-label="Choose a day">
           {days.map((date, index) => {
             const active = index === dayIndex
@@ -225,92 +367,49 @@ export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange,
         </div>
       )}
 
-      {view === "day" && (
+      {view === "day" && !preview && (
         <p className="mb-3 text-[15px] font-semibold text-[#64748B]">A gold dot means you have something that day. Tap a box for details.</p>
       )}
 
-      {view === "week" && (
+      {view === "week" && !preview && (
         <p className="mb-2 text-[15px] font-semibold text-[#64748B] lg:hidden">Swipe left or right to see every day. Tap a box for details.</p>
       )}
 
-      <div
-        ref={scrollRef}
-        className="relative max-h-[72vh] overflow-auto rounded-2xl [--time-col:76px] sm:[--time-col:96px] border-2 border-[#1B3A6B]/80 bg-white shadow-sm lg:max-h-none"
-        style={{ scrollbarWidth: "thin" }}
-      >
-        <div className={view === "week" ? "min-w-[916px] lg:min-w-0" : ""}>
-          {/* Header row */}
-          <div className="sticky top-0 z-30 grid border-b-2 border-[#1B3A6B]/80" style={{ gridTemplateColumns: columns }}>
-            <div className="sticky left-0 z-10 border-r-2 border-[#1B3A6B]/80 bg-[#E8EDF7] px-2 py-3 text-center text-[14px] font-bold text-[#1B3A6B]">Time</div>
-            {shownDays.map(({ date, index }) => {
-              const isToday = index === todayIndex
-              return (
-                <div
-                  key={index}
-                  data-day={index}
-                  className={`border-r border-[#9BA8C0] px-2 py-2 text-center last:border-r-0 ${isToday ? "bg-[#1B3A6B] text-white" : "bg-[#E8EDF7] text-[#1B3A6B]"}`}
-                >
-                  <p className="text-[17px] font-extrabold leading-tight">{DAY_LONG[index]}</p>
-                  <p className={`text-[15px] font-semibold ${isToday ? "text-white" : "text-[#475569]"}`}>
-                    {date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}{isToday ? " · Today" : ""}
-                  </p>
-                </div>
-              )
-            })}
+      {layout === "full" ? (
+        // The whole table at its natural height; only the page scrolls up and down. The table itself only swipes sideways.
+        // A sticky header can't stick to the page from inside a sideways-scrolling box, so the day header sits above it,
+        // sticks to the top of the page, and follows the sideways swipe (syncHeader). The Time column stays pinned on the left.
+        <div className={`rounded-2xl ${frame}`}>
+          <div ref={headerRef} className="sticky top-0 z-30 overflow-hidden rounded-t-[14px]">
+            <div className={minWidth}>{headerRow}</div>
           </div>
-
-          {/* Body */}
-          <div className="grid" style={{ gridTemplateColumns: columns }}>
-            {/* Time labels */}
-            <div className="sticky left-0 z-20 border-r-2 border-[#1B3A6B]/80 bg-[#E8EDF7]">
-              {hours.map(hour => (
-                <div key={hour} className="flex flex-col items-center justify-center border-b border-[#9BA8C0] px-1 text-center last:border-b-0" style={{ height: HOUR_HEIGHT }}>
-                  <span className="text-[16px] font-extrabold leading-tight text-[#1B3A6B]">{hourLabel(hour)}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Day columns */}
-            {shownDays.map(({ date, index }) => (
-              <div
-                key={index}
-                className={`relative border-r border-[#9BA8C0] last:border-r-0 ${index === todayIndex ? "bg-[#1B3A6B]/[0.04]" : ""}`}
-                style={{
-                  height: gridHeight,
-                  backgroundImage: `repeating-linear-gradient(to bottom, transparent 0, transparent ${HOUR_HEIGHT / 2 - 1}px, #E2E8F0 ${HOUR_HEIGHT / 2 - 1}px, #E2E8F0 ${HOUR_HEIGHT / 2}px, transparent ${HOUR_HEIGHT / 2}px, transparent ${HOUR_HEIGHT - 1}px, #9BA8C0 ${HOUR_HEIGHT - 1}px, #9BA8C0 ${HOUR_HEIGHT}px)`,
-                }}
-              >
-                {layoutDay(placed.filter(event => event.day === index)).map(({ event, lane, lanes }) => {
-                  const top = ((toMinutes(event.start) - firstHour * 60) / 60) * HOUR_HEIGHT
-                  const height = Math.max(((toMinutes(event.end) - toMinutes(event.start)) / 60) * HOUR_HEIGHT, HOUR_HEIGHT * 0.85)
-                  const width = 100 / lanes
-                  const timeText = event.allDay ? "All day" : formatRange(event.start, event.end)
-                  return (
-                    <button
-                      key={event.id}
-                      onClick={() => setSelected({ event, date })}
-                      aria-label={`${event.label}, ${DAY_LONG[index]}, ${event.allDay ? "all day" : `${formatClock(event.start)} to ${formatClock(event.end)}`}${event.detail ? `, ${event.detail}` : ""}`}
-                      className={`absolute z-10 flex flex-col items-center justify-center overflow-hidden rounded-lg border-2 px-1.5 py-1 text-center shadow-sm transition-transform hover:scale-[1.02] focus-visible:z-20 ${TIMETABLE_COLORS[event.color].block}`}
-                      style={{ top: top + 2, height: height - 4, left: `calc(${lane * width}% + 3px)`, width: `calc(${width}% - 6px)` }}
-                    >
-                      <span className="text-[16px] font-extrabold leading-tight">{event.label}</span>
-                      <span className="mt-0.5 text-[14px] font-bold leading-tight">{timeText}</span>
-                      {/* The detail fits in the wide one-day column, and in the week view on large screens. */}
-                      {event.detail && <span className={`text-[14px] font-semibold leading-tight ${view === "day" ? "" : "hidden lg:block"}`}>{event.detail}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
+          <div ref={scrollRef} onScroll={syncHeader} className="overflow-x-auto overflow-y-hidden rounded-b-[14px]" style={{ scrollbarWidth: "thin" }}>
+            <div className={minWidth}>{body}</div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="relative">
+          <div
+            ref={scrollRef}
+            inert={preview}
+            className={`relative rounded-2xl ${frame} ${preview ? "pointer-events-none h-[220px] overflow-hidden" : "max-h-[72vh] overflow-auto lg:max-h-none"}`}
+            style={{ scrollbarWidth: "thin" }}
+          >
+            <div className={minWidth}>
+              {headerRow}
+              {body}
+            </div>
+          </div>
+          {/* Soft fade at the bottom of the preview, so it's clear there is more below. */}
+          {preview && <div className="pointer-events-none absolute inset-x-[2px] bottom-[2px] h-24 rounded-b-2xl bg-gradient-to-b from-white/0 via-white/80 to-white" aria-hidden="true" />}
+        </div>
+      )}
 
-      {view === "day" && events.filter(event => event.day === dayIndex).length === 0 && (
+      {view === "day" && !preview && events.filter(event => event.day === dayIndex).length === 0 && (
         <p className="mt-3 rounded-xl bg-white p-4 text-center text-[17px] font-semibold text-[#64748B]">Nothing added for {DAY_LONG[dayIndex]}.</p>
       )}
 
-      {legend && legend.length > 0 && (
+      {legend && legend.length > 0 && !preview && (
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[16px] font-semibold text-[#1A202C]" aria-label="Color guide">
           {legend.map(item => (
             <span key={item.label} className="flex items-center gap-2">
