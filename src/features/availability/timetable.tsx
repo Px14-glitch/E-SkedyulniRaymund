@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Button, useSheetClose } from "../../shared/ui"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -153,6 +153,61 @@ function EventSheet({ event, date, onClose }: { event: TimetableEvent; date: Dat
   )
 }
 
+// ─── Event block ──────────────────────────────────────────────────────────────
+
+const MIN_FIT = 0.6 // the smallest the text may shrink to, as a share of its normal size
+
+/** One box on the timetable. Its text shrinks step by step until it fits inside the box, and re-fits when the box is resized. */
+function EventBlock({ event, timeText, showDetail, onClick, ariaLabel, style }: {
+  event: TimetableEvent
+  timeText: string
+  showDetail: boolean
+  onClick: () => void
+  ariaLabel: string
+  style: CSSProperties
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  const [fit, setFit] = useState(1)
+
+  useLayoutEffect(() => {
+    const box = ref.current
+    if (!box) return
+    function refit() {
+      if (!box) return
+      const overflows = () => box.scrollWidth > box.clientWidth + 1 || box.scrollHeight > box.clientHeight + 1
+      let scale = 1
+      box.style.setProperty("--fit", "1")
+      while (scale > MIN_FIT && overflows()) {
+        scale = Math.max(MIN_FIT, Math.round((scale - 0.05) * 100) / 100)
+        box.style.setProperty("--fit", String(scale))
+      }
+      setFit(scale)
+    }
+    refit()
+    const observer = new ResizeObserver(refit)
+    observer.observe(box)
+    document.fonts?.ready.then(refit)
+    return () => observer.disconnect()
+  }, [event.label, timeText, event.detail, showDetail])
+
+  const size = (px: number) => ({ fontSize: `calc(${px}px * var(--fit, ${fit}))` })
+
+  return (
+    <button
+      ref={ref}
+      onClick={onClick}
+      aria-label={ariaLabel}
+      className={`absolute z-10 flex flex-col items-center justify-center overflow-hidden rounded-lg border-2 px-1.5 py-1 text-center shadow-sm transition-transform hover:scale-[1.02] focus-visible:z-20 ${TIMETABLE_COLORS[event.color].block}`}
+      style={style}
+    >
+      <span className="font-extrabold leading-tight" style={size(16)}>{event.label}</span>
+      <span className="mt-0.5 font-bold leading-tight" style={size(14)}>{timeText}</span>
+      {/* The detail fits in the wide one-day column, and in the week view on large screens. */}
+      {event.detail && <span className={`font-semibold leading-tight ${showDetail ? "" : "hidden lg:block"}`} style={size(14)}>{event.detail}</span>}
+    </button>
+  )
+}
+
 // ─── Timetable ────────────────────────────────────────────────────────────────
 
 export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange, dayIndex, onDayIndexChange, layout = "inline" }: {
@@ -266,18 +321,15 @@ export function WeeklyTimetable({ events, weekStart, legend, view, onViewChange,
             const width = 100 / lanes
             const timeText = event.allDay ? "All day" : formatRange(event.start, event.end)
             return (
-              <button
+              <EventBlock
                 key={event.id}
+                event={event}
+                timeText={timeText}
+                showDetail={view === "day"}
                 onClick={() => setSelected({ event, date })}
-                aria-label={`${event.label}, ${DAY_LONG[index]}, ${event.allDay ? "all day" : `${formatClock(event.start)} to ${formatClock(event.end)}`}${event.detail ? `, ${event.detail}` : ""}`}
-                className={`absolute z-10 flex flex-col items-center justify-center overflow-hidden rounded-lg border-2 px-1.5 py-1 text-center shadow-sm transition-transform hover:scale-[1.02] focus-visible:z-20 ${TIMETABLE_COLORS[event.color].block}`}
+                ariaLabel={`${event.label}, ${DAY_LONG[index]}, ${event.allDay ? "all day" : `${formatClock(event.start)} to ${formatClock(event.end)}`}${event.detail ? `, ${event.detail}` : ""}`}
                 style={{ top: top + 2, height: height - 4, left: `calc(${lane * width}% + 3px)`, width: `calc(${width}% - 6px)` }}
-              >
-                <span className="text-[16px] font-extrabold leading-tight">{event.label}</span>
-                <span className="mt-0.5 text-[14px] font-bold leading-tight">{timeText}</span>
-                {/* The detail fits in the wide one-day column, and in the week view on large screens. */}
-                {event.detail && <span className={`text-[14px] font-semibold leading-tight ${view === "day" ? "" : "hidden lg:block"}`}>{event.detail}</span>}
-              </button>
+              />
             )
           })}
         </div>
