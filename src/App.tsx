@@ -16,11 +16,14 @@ import { useAvailability } from "./features/availability/useAvailability"
 // Open Slots
 import { SlotList, SlotVolunteerScreen, SlotServingScreen, SlotFilledScreen } from "./features/slots/slots"
 import { useSlots } from "./features/slots/useSlots"
+import { AdminScreen } from "./features/admin/admin"
+import { AdminLoginScreen } from "./features/admin/login"
 
 export default function App() {
   const isDesktop = useIsDesktop()
   const [screen, setScreen] = useState<Screen>("welcome")
   const [prevScreen, setPrevScreen] = useState<Screen>("welcome")
+  const [adminAuthenticated, setAdminAuthenticated] = useState(false)
 
   const [homeTab, setHomeTab] = useState<HomeTab>("availability")
   const [ministry, setMinistry] = useState(MINISTRIES[0])
@@ -59,7 +62,36 @@ export default function App() {
   switch (screen) {
     // ─── Wizard ───────────────────────────────────────────────────────────────
     case "welcome":
-      return <WelcomeScreen onStart={() => go("tell-name")} />
+      return <WelcomeScreen onStart={() => go("tell-name")} onAdmin={() => go("admin-login")} />
+
+    case "admin-login":
+      return (
+        <AdminLoginScreen
+          onBack={() => go("welcome")}
+          onAuthenticated={() => {
+            setAdminAuthenticated(true)
+            go("admin")
+          }}
+        />
+      )
+
+    case "admin":
+      return adminAuthenticated ? (
+        <AdminScreen
+          onLogout={() => {
+            setAdminAuthenticated(false)
+            go("welcome")
+          }}
+        />
+      ) : (
+        <AdminLoginScreen
+          onBack={() => go("welcome")}
+          onAuthenticated={() => {
+            setAdminAuthenticated(true)
+            go("admin")
+          }}
+        />
+      )
 
     case "tell-name":
       return (
