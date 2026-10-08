@@ -3,7 +3,7 @@ import type { FormData } from "./types"
 import { ScreenShell, Card, Logo, Button, InputField, BackButton, ClockIcon } from "../../shared/ui"
 import { EXAMPLE_GROUPS, PENDING_STEPS } from "./data"
 
-export function WelcomeScreen({ onStart }: { onStart: () => void }) {
+export function WelcomeScreen({ onStart, onAdmin }: { onStart: () => void; onAdmin: () => void }) {
   return (
     <ScreenShell>
       <div className="mt-16 flex flex-col items-center gap-10">
@@ -29,6 +29,7 @@ export function WelcomeScreen({ onStart }: { onStart: () => void }) {
 
         <div className="flex w-full flex-col items-center gap-4">
           <Button onClick={onStart}>Get Started</Button>
+          <Button onClick={onAdmin} variant="ghost">Sign in as Admin</Button>
         </div>
       </div>
     </ScreenShell>
