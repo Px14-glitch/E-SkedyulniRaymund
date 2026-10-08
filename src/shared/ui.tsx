@@ -76,7 +76,7 @@ export function BackButton({ onClick }: { onClick: () => void }) {
 interface ButtonProps {
   children: React.ReactNode
   onClick?: () => void
-  variant?: "primary" | "secondary" | "ghost" | "tabActive" | "tabInactive"
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "tabActive" | "tabInactive"
   size?: "default" | "compact"
   type?: "button" | "submit"
   fullWidth?: boolean
@@ -100,6 +100,7 @@ export function Button({
     primary: "bg-[#1B3A6B] text-white hover:bg-[#142d54] active:scale-[0.98]",
     secondary: "bg-white text-[#1B3A6B] border-2 border-[#1B3A6B] hover:bg-[#F4F6FB] active:scale-[0.98]",
     ghost: "bg-transparent text-[#1B3A6B] hover:bg-[#E8EDF7] active:scale-[0.98]",
+    danger: "bg-[#C0392B] text-white hover:bg-[#9F2F23] active:scale-[0.98]",
     tabActive: "bg-white text-navy shadow-sm",
     tabInactive: "bg-transparent text-muted hover:text-navy",
   }
